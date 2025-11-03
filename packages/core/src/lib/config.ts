@@ -1,59 +1,104 @@
-import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
+import { promises as fs } from "fs";
+import path from "path";
 
-/**
- * Configuration interface for the Surveyor tool.
- */
-export interface Config {
+export type SurveyorConfig = {
   shadowDir: string;
-  roots: string[];
+  roots?: string[];
   include: string[];
   exclude: string[];
-}
-
-/**
- * Default configuration values (excluding roots which is auto-detected).
- */
-const defaultConfig: Omit<Config, 'roots'> = {
-  shadowDir: '.surveyor',
-  include: ['**/*'],
-  exclude: ['**/node_modules/**', 'dist/**', '**/*.d.ts', '**/*.map', '.git/**']
+  /** size guard in bytes */
+  maxBytes?: number;
+  /** import paths to ignore in File Map (noise/placeholders) */
+  importIgnore?: string[];
+  profiles?: Record<string, string[]>;
 };
 
-/**
- * Loads the configuration from .project/surveyorrc.json if it exists,
- * otherwise returns the default configuration with auto-detected roots.
- */
-export function loadConfig(): Config {
-  const configPath = join(process.cwd(), '.project', 'surveyorrc.json');
-  let userConfig: Partial<Config> = {};
-  if (existsSync(configPath)) {
-    const content = readFileSync(configPath, 'utf-8');
-    userConfig = JSON.parse(content);
+const DEFAULTS: SurveyorConfig = {
+  shadowDir: ".surveyor",
+  include: [
+    "**/*.{ts,tsx,js,jsx,mjs,cjs}",
+    "**/*.{json,yaml,yml}",
+    "**/*.{md,mdx}"
+  ],
+  exclude: [
+    "**/node_modules/**",
+    ".git/**",
+    "**/dist/**",
+    ".surveyor/**",
+    "**/*.d.ts",
+    "**/*.map",
+    "**/.DS_Store",
+    "**/.next/**",
+    "**/.turbo/**",
+    "**/.cache/**",
+    // New: avoid stray compiled JS in TS repos by default
+    "**/src/**/*.js",
+    "**/src/**/*.js.map"
+  ],
+  maxBytes: 256 * 1024,
+  importIgnore: ["pkg", "side-effect"], // placeholders
+  profiles: {
+    small: ["repoMap", "fileMap"],
+    full: ["repoMap", "fileMap", "symbolMap", "files"]
   }
+};
 
-  // Auto-detect roots if not specified in user config
-  let roots: string[];
-  if (userConfig.roots) {
-    roots = userConfig.roots;
-  } else {
-    const cwd = process.cwd();
-    if (existsSync(join(cwd, 'apps')) || existsSync(join(cwd, 'packages')) || existsSync(join(cwd, 'pnpm-workspace.yaml'))) {
-      roots = ['apps/**', 'packages/**'];
-    } else if (existsSync(join(cwd, 'src'))) {
-      roots = ['src'];
-    } else {
-      roots = ['.'];
-    }
+export async function loadConfig(
+  repoRoot: string = process.cwd(),
+  overrides?: {
+    roots?: string[];
+    include?: string[];
+    exclude?: string[];
+    maxBytes?: number;
   }
+): Promise<SurveyorConfig & { repoRoot: string; roots: string[] }> {
+  const cfgPath = path.join(repoRoot, ".project", "surveyorrc.json");
+  let user: Partial<SurveyorConfig> = {};
+  try {
+    const raw = await fs.readFile(cfgPath, "utf8");
+    user = JSON.parse(raw);
+  } catch { /* no config is fine */ }
 
-  // Merge exclude patterns and ensure .surveyor/** is always excluded
-  const exclude = [...new Set([...defaultConfig.exclude, ...(userConfig.exclude || []), '.surveyor/**'])];
+  const roots = await autoDetectRoots(repoRoot, overrides?.roots ?? user.roots);
 
   return {
-    ...defaultConfig,
-    ...userConfig,
+    repoRoot,
+    shadowDir: user.shadowDir ?? DEFAULTS.shadowDir,
     roots,
-    exclude
+    include: overrides?.include?.length ? overrides.include
+            : user.include?.length ? user.include
+            : DEFAULTS.include,
+    exclude: overrides?.exclude?.length ? overrides.exclude
+            : user.exclude?.length ? user.exclude
+            : DEFAULTS.exclude,
+    maxBytes: overrides?.maxBytes ?? user.maxBytes ?? DEFAULTS.maxBytes,
+    importIgnore: user.importIgnore?.length ? user.importIgnore : DEFAULTS.importIgnore,
+    profiles: { ...(DEFAULTS.profiles || {}), ...(user.profiles || {}) }
   };
+}
+
+async function exists(p: string) {
+  try { await fs.stat(p); return true; } catch { return false; }
+}
+
+async function autoDetectRoots(repoRoot: string, userRoots?: string[]) {
+  if (userRoots && userRoots.length) {
+    return userRoots.map(r => normalize(repoRoot, r));
+  }
+  const haveApps = await exists(path.join(repoRoot, "apps"));
+  const havePkgs = await exists(path.join(repoRoot, "packages"));
+  const haveWS   = await exists(path.join(repoRoot, "pnpm-workspace.yaml"));
+  if (haveApps || havePkgs || haveWS) {
+    const roots: string[] = [];
+    if (haveApps) roots.push("apps/*/src", "apps/*");
+    if (havePkgs) roots.push("packages/*/src", "packages/*");
+    if (await exists(path.join(repoRoot, "src"))) roots.push("src");
+    return roots.map(r => normalize(repoRoot, r));
+  }
+  if (await exists(path.join(repoRoot, "src"))) return [normalize(repoRoot, "src")];
+  return [repoRoot];
+}
+
+function normalize(repoRoot: string, p: string) {
+  return p.startsWith("/") ? p : path.join(repoRoot, p);
 }

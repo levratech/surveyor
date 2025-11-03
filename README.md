@@ -1,174 +1,55 @@
 # Surveyor
+Minimal repo "atlas" generator for AI + humans. Produces:
+- `.surveyor/report.md` — human-readable summary (header + File Map + file contents)
+- `.surveyor/report.meta.json` — machine JSON (root, files, optional fileMap, version, gitCommit, generatedAt)
 
-**Surveyor** is a codebase surveying tool that produces a deterministic, AI-ready report of your repository. It extracts structural layers of a project—repo, file, and symbol metadata—and generates a compact snapshot optimized for AI reasoning, navigation, and safe code modification.
+## Install (workspace)
+```bash
+pnpm install
+pnpm --filter @levratech/surveyor build
+```
 
-Surveyor enables AI agents to work effectively on codebases without loading the entire repo into context.
-
----
-
-## Table of Contents
-
-- [Status](#status)
-- [Overview](#overview)
-- [Core Features](#core-features)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [CLI Commands](#cli-commands)
-- [Directory Structure](#directory-structure)
-- [Chronchive Integration (Optional)](#chronchive-integration-optional)
-- [Roadmap](#roadmap)
-- [License](#license)
-
----
-
-## Status
-
-**Pre-Alpha** — APIs, report formats, and directory conventions may change before v0.3.
-
----
-
-## Overview
-
-AI models can read code, but not all codebases are structured in a way that makes it easy for AI to reason about them. Surveyor provides a layered code-intelligence model that externalizes the core information an AI needs to navigate and understand a repository.
-
-| Layer        | Description                                                             |
-|--------------|-------------------------------------------------------------------------|
-| Repo Map     | Architecture, packages, entrypoints, dependencies, exclusions           |
-| File Map     | Per-file imports, exports, surfaces, responsibilities, complexity       |
-| Symbol Map   | Functions/classes/types with signatures, effects, tests, ownership      |
-| Slices       | Targeted subsets of code + metadata for LLM prompts                     |
-
-Surveyor reports are regenerable, deterministic, and language-extensible.
-
----
-
-## Core Features
-
-- Deterministic code survey report for AI tooling and review
-- Layered metadata (repo → file → symbol)
-- Precision slicing for minimal-context LLM prompts
-- Designed for round-trip safe AI edits and verification
-- Extensible architecture with language adapters (TS first)
-- Excludes lockfile and noise by default (summarized instead)
-- Optional integration with Chronchive for planning workflows
-
----
-
-## Installation
+## Usage
 
 ```bash
-npm install -D @levratech/surveyor
-````
-
-Surveyor exposes the CLI commands `surveyor` and `svy`.
-
----
-
-## Quick Start
-
-Generate a survey:
-
-```bash
-npx surveyor build
+pnpm svy build           # MD + JSON
+pnpm svy build --meta-only
+pnpm svy build --no-file-map
+pnpm svy build --roots=src,packages/*/src --include=**/*.ts --exclude=**/*.test.ts
+pnpm svy build --max-bytes=131072
 ```
 
-This creates a local shadow directory (ignored by git):
+## Defaults
+•Auto-detect roots (monorepo-aware: packages/*/src, apps/*/src, src)
+•Excludes: node_modules, .git, dist, .surveyor, **/*.d.ts, **/*.map, and JS artifacts inside src/
+•Size/binary guards (skip >256KB or binary-ish files)
+•File Map (regex-based imports/exports) with stoplist for placeholders ("pkg", "side-effect")
 
-```
-.surveyor/
-  report.md
-  report.meta.json
-  report.index.json
-```
+## Config (optional)
 
-Recommended configuration file:
-
-**`.project/surveyorrc.json`**
+Create .project/surveyorrc.json:
 
 ```json
 {
   "shadowDir": ".surveyor",
-  "include": ["src/**","apps/**","packages/**"],
-  "exclude": [
-    "**/node_modules/**",".git/**","dist/**",
-    "package-lock.json","yarn.lock","pnpm-lock.yaml"
-  ],
-  "profiles": {
-    "small": ["repoMap","fileMap"],
-    "full": ["repoMap","fileMap","symbolMap","files"]
-  }
+  "roots": ["src","packages/*/src"],
+  "include": ["**/*.{ts,tsx,js,jsx}", "**/*.json"],
+  "exclude": ["**/node_modules/**","dist/**",".surveyor/**"],
+  "maxBytes": 262144,
+  "importIgnore": ["pkg", "side-effect"]
 }
 ```
 
-**`.gitignore`**
+## Output header (stamped)
+•Version from package
+•Git Commit (git rev-parse --short HEAD)
+•Generated At ISO timestamp
 
-```
-.surveyor/
-```
+## Why
 
----
-
-## CLI Commands
-
-| Command                        | Description                                   |
-| ------------------------------ | --------------------------------------------- |
-| `surveyor build`               | Generate a full survey report                 |
-| `surveyor meta gen`            | Regenerate metadata only                      |
-| `surveyor slice --profile <p>` | Output a selected subset of the report        |
-| `surveyor verify`              | Validate that repo matches last survey digest |
-
-Examples:
-
-```bash
-# Produce a minimal LLM-friendly slice
-npx surveyor slice --profile small > survey.slice.md
-
-# Regenerate metadata only
-npx surveyor meta gen
-```
-
----
-
-## Directory Structure
-
-| Path                       | Committed | Purpose                               |
-| -------------------------- | --------- | ------------------------------------- |
-| `.project/surveyorrc.json` | Yes       | Config consumed by Surveyor           |
-| `.surveyor/`               | No        | Generated artifacts and cache         |
-| `report.md`                | Local     | Code snapshot (deterministic)         |
-| `report.meta.json`         | Local     | Repo/File/Symbol metadata             |
-| `report.index.json`        | Local     | Fingerprints for incremental rebuilds |
-
-Artifacts in `.surveyor/` are regenerable and should not be committed.
-
----
-
-## Chronchive Integration (Optional)
-
-Surveyor is standalone. When paired with Chronchive:
-
-* Chronchive consumes `report.meta.json`
-* Enables code-aware Story creation and automated planning
-* Improves agent-driven refactoring and reasoning safety
-
-Integration will be provided via a separate bridge package:
-
-`@levratech/chronchive-surveyor-bridge` *(planned)*
-
----
+Large context ≠ useful context. Surveyor compresses a repo into tiered views so agents (and people) can reason without slurping everything.
 
 ## Roadmap
-
-| Version | Scope                                    |
-| ------- | ---------------------------------------- |
-| v0.1    | Core CLI: build, meta gen, slice, verify |
-| v0.2    | TS adapter, incremental rebuilds, daemon |
-| v0.3    | Doc sidecars, PR artifact automation     |
-| v0.4    | Python & Go adapters, editor extension   |
-| v1.0    | Stable spec + Chronchive integration     |
-
----
-
-## License
-
-MIT
+•svy slice --profile small (summary + file map + selected files)
+•--adapter ts (AST-accurate imports/exports via ts-morph)
+•CI drift check (fail PR if report.meta.json changes unexpectedly)

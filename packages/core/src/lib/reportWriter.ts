@@ -1,65 +1,99 @@
-import { writeFile, mkdir } from 'fs/promises';
-import { join, extname, resolve } from 'path';
-import { readFileSync } from 'fs';
-import { Config } from './config';
+import { promises as fs } from "fs";
+import path from "path";
 
-/**
- * Mapping of file extensions to language names for syntax highlighting.
- */
-const languageMap: Record<string, string> = {
-  '.ts': 'typescript',
-  '.js': 'javascript',
-  '.json': 'json',
-  '.md': 'markdown',
-  '.py': 'python',
-  // Add more extensions as needed
-};
+type FileMap = Record<string, { imports: string[]; exports: string[] }>;
+type Stamp = { version: string; gitCommit: string; generatedAt: string };
 
-/**
- * Determines the language for syntax highlighting based on file extension.
- */
-function getLanguage(filePath: string): string | undefined {
-  const ext = extname(filePath);
-  return languageMap[ext];
-}
+export async function writeReportMd(
+  repoRoot: string,
+  shadowDir: string,
+  files: string[],
+  roots: string[],
+  fileMap: FileMap | undefined,
+  stamp: Stamp
+) {
+  const outDir = path.join(repoRoot, shadowDir);
+  await fs.mkdir(outDir, { recursive: true });
+  const mdPath = path.join(outDir, "report.md");
 
-/**
- * Writes the report.md and report.meta.json files to the shadow directory.
- */
-export async function writeReport(config: Config, roots: string[], files: string[]) {
-  const shadowDir = join(process.cwd(), config.shadowDir);
-  // Ensure the shadow directory exists
-  await mkdir(shadowDir, { recursive: true });
-  const reportMdPath = join(shadowDir, 'report.md');
-  const reportMetaPath = join(shadowDir, 'report.meta.json');
-
-  // Generate and write the meta.json file
-  const meta = {
-    root: resolve(process.cwd()),
-    shadowDir: config.shadowDir,
-    generatedAt: new Date().toISOString(),
-    files
-  };
-  await writeFile(reportMetaPath, JSON.stringify(meta, null, 2));
-
-  // Generate the content for report.md
-  let content = `## Survey Summary
-Root: ${resolve(process.cwd())}
+  const header =
+`## Survey Summary
+Root: ${repoRoot}
 Included files: ${files.length}
-Roots: ${roots.join(', ')}
-Shadow dir: ${config.shadowDir}
-`;
-  // Append each file's content
-  for (const file of files) {
-    const lang = getLanguage(file);
-    const fileContent = readFileSync(join(process.cwd(), file), 'utf-8');
-    content += `### File: ${file}
-\`\`\`${lang || ''}
-${fileContent}
+Roots: ${roots.map(r => path.relative(repoRoot, r) || "." ).join(", ")}
+Shadow dir: ${shadowDir}
+Version: ${stamp.version}
+Git Commit: ${stamp.gitCommit}
+Generated At: ${stamp.generatedAt}
+
+---`;
+
+  // Optional compact File Map section
+  const fm = fileMap ? renderFileMap(fileMap) : "";
+
+  const chunks: string[] = [header, "\n", fm, "\n"];
+
+  for (const rel of files) {
+    const abs = path.join(repoRoot, rel);
+    const content = await fs.readFile(abs, "utf8");
+    const lang = fenceLangFromExt(rel);
+    chunks.push(
+`### File: ${rel}
+\`\`\`${lang}
+${content}
 \`\`\`
 
-`;
+`);
   }
-  // Write the report.md file
-  await writeFile(reportMdPath, content);
+
+  await fs.writeFile(mdPath, chunks.join(""), "utf8");
+}
+
+export async function writeReportMeta(
+  repoRoot: string,
+  shadowDir: string,
+  files: string[],
+  fileMap: FileMap | undefined,
+  stamp: Stamp
+) {
+  const outDir = path.join(repoRoot, shadowDir);
+  await fs.mkdir(outDir, { recursive: true });
+  const metaPath = path.join(outDir, "report.meta.json");
+  const meta = {
+    root: repoRoot,
+    shadowDir,
+    generatedAt: stamp.generatedAt,
+    version: stamp.version,
+    gitCommit: stamp.gitCommit,
+    files,
+    ...(fileMap ? { fileMap } : {})
+  };
+  await fs.writeFile(metaPath, JSON.stringify(meta, null, 2), "utf8");
+}
+
+function renderFileMap(fileMap: FileMap) {
+  const lines: string[] = ["## File Map"];
+  const sorted = Object.keys(fileMap).sort();
+  for (const rel of sorted) {
+    const m = fileMap[rel];
+    const im = m.imports.length ? m.imports.join(", ") : "-";
+    const ex = m.exports.length ? m.exports.join(", ") : "-";
+    lines.push(`- **${rel}**\n  - imports: ${im}\n  - exports: ${ex}`);
+  }
+  lines.push("\n---");
+  return lines.join("\n");
+}
+
+function fenceLangFromExt(rel: string) {
+  const ext = rel.split(".").pop()?.toLowerCase();
+  switch (ext) {
+    case "ts": return "ts";
+    case "tsx": return "tsx";
+    case "js": return "js";
+    case "jsx": return "jsx";
+    case "json": return "json";
+    case "md": case "mdx": return "md";
+    case "yml": case "yaml": return "yaml";
+    default: return "";
+  }
 }

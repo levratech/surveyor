@@ -1,0 +1,11 @@
+{
+  "name": "surveyor",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "svy": "pnpm --filter @levratech/surveyor exec node dist/index.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "root": "/srv/surveyor/packages/core",
+  "shadowDir": ".surveyor",
+  "generatedAt": "2025-11-03T00:18:14.691Z",
+  "files": [
+    "src/commands/build.d.ts",
+    "src/commands/build.js",
+    "src/commands/build.ts",
+    "src/index.d.ts",
+    "src/index.js",
+    "src/index.ts",
+    "src/lib/config.d.ts",
+    "src/lib/config.js",
+    "src/lib/config.ts",
+    "src/lib/fileScanner.d.ts",
+    "src/lib/fileScanner.js",
+    "src/lib/fileScanner.ts",
+    "src/lib/reportWriter.d.ts",
+    "src/lib/reportWriter.js",
+    "src/lib/reportWriter.ts"
+  ]
+}
